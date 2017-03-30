@@ -64,9 +64,9 @@ makeConsFolds nm ty cons = sequenceA [go, rest, appInst]
     go = do
         rn <- newName "r"
         let r = PlainTV rn
-        DataD [] (foldGadtName nm) (ty ++ [r]) Nothing <$>
-            (pure . RecC (foldGadtName nm) <$> traverse (h (VarT rn)) cons) <*>
-            pure [ConT (mkName "Functor")]
+        case cons of
+          [x] -> NewtypeD [] (foldGadtName nm) (ty ++ [r]) Nothing <$> (RecC (foldGadtName nm) <$> traverse (h (VarT rn)) [x]) <*> pure [ConT (mkName "Functor")]
+          _ -> DataD [] (foldGadtName nm) (ty ++ [r]) Nothing <$> (pure . RecC (foldGadtName nm) <$> traverse (h (VarT rn)) cons) <*> pure [ConT (mkName "Functor")]
     h r ncon =
         return
             ( foldConsName (ncon ^. nconName)
