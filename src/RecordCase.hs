@@ -13,7 +13,8 @@ module RecordCase
   ,MaybeAlg(..)
   ,EitherAlg(..)
   ,ListAlg(..)
-  ,FoldAlg(..))
+  ,FoldAlg(..)
+  ,($|))
   where
 
 import RecordCase.TH (makeHandler)
@@ -26,6 +27,10 @@ import RecordCase.TH (makeHandler)
 -- >   cons = const id
 class handler `Handles` patt  where
     recCase :: handler a -> patt -> a
+
+infixr 0 $|
+($|) :: (handler `Handles` patt) => handler a -> patt -> a
+($|) = recCase
 
 makeHandler ''Maybe
 makeHandler ''Either
