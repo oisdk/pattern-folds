@@ -16,6 +16,8 @@ library
   hs-source-dirs:      src
   exposed-modules:     PatternFolds
                      , PatternFolds.TH
+                     , RecordCase
+                     , RecordCase.TH
   build-depends:       base >= 4.7 && < 5
                      , lens >= 4.15
                      , template-haskell >= 2.11
