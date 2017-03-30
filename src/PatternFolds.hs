@@ -1,7 +1,7 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs                  #-}
-{-# LANGUAGE LambdaCase             #-}
 {-# LANGUAGE RankNTypes             #-}
+{-# LANGUAGE LambdaCase             #-}
 
 module PatternFolds (makePatternFolds,AsPatternFold(..)) where
 

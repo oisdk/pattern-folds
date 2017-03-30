@@ -113,11 +113,14 @@ foldGadtName :: Name -> Name
 foldGadtName n = case nameBase n of
   [] -> error "foldGadtName: empty name base?"
   x:xs | isUpper x -> mkName (x : repF xs)
-       | otherwise -> mkName (x : xs ++ ".")
+       | otherwise -> mkName (x : repC xs)
        where
          repF [] = "I"
          repF "F" = "I"
          repF (c:cs) = c : repF cs
+         repC [] = "|"
+         repC ":" = "|"
+         repC (c:cs) = c : repC cs
 
 convertTVBs :: [TyVarBndr] -> [Type]
 convertTVBs = map (VarT . bndrName)
