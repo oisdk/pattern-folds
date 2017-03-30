@@ -11,13 +11,14 @@ import Control.Monad (replicateM)
 
 data NCon = NCon
   { _nconName :: Name
+  , _nconForall :: [TyVarBndr]
   , _nconCxt  :: Maybe Cxt
   , _nconTypes :: [Type]
   }
   deriving (Eq)
 
 instance HasTypeVars NCon where
-  typeVarsEx s f (NCon x y z) = NCon x <$> typeVarsEx s f y <*> typeVarsEx s f z
+  typeVarsEx s f (NCon x w y  z) = NCon x w <$> typeVarsEx s f y <*> typeVarsEx s f z
 
 nconName :: Lens' NCon Name
 nconName f x = fmap (\y -> x {_nconName = y}) (f (_nconName x))
@@ -46,17 +47,17 @@ makeDecFolds dec = case dec of
     makeConsFolds ty args (concatMap normalizeCon cons)
 
 normalizeCon :: Con -> [NCon]
-normalizeCon (RecC    conName xs) = [NCon conName Nothing (map (view _3) xs)]
-normalizeCon (NormalC conName xs) = [NCon conName Nothing (map (view _2) xs)]
-normalizeCon (InfixC (_,x) conName (_,y)) = [NCon conName Nothing [x,y]]
+normalizeCon (RecC    conName xs) = [NCon conName [] Nothing (map (view _3) xs)]
+normalizeCon (NormalC conName xs) = [NCon conName [] Nothing (map (view _2) xs)]
+normalizeCon (InfixC (_,x) conName (_,y)) = [NCon conName [] Nothing [x,y]]
 normalizeCon (ForallC [] [] con) = normalizeCon con -- happens in GADTs
-normalizeCon (ForallC _ cx1 con) =
-  [NCon n (Just cx1 <> cx2) tys
-     | NCon n cx2 tys <- normalizeCon con ]
+normalizeCon (ForallC o cx1 con) =
+  [NCon n (o++w) (Just cx1 <> cx2) tys
+     | NCon n w cx2 tys <- normalizeCon con ]
 normalizeCon (GadtC conNames xs _)    =
-  [ NCon conName Nothing (map (view _2) xs) | conName <- conNames ]
+  [ NCon conName [] Nothing (map (view _2) xs) | conName <- conNames ]
 normalizeCon (RecGadtC conNames xs _) =
-  [ NCon conName Nothing (map (view _3) xs) | conName <- conNames ]
+  [ NCon conName [] Nothing (map (view _3) xs) | conName <- conNames ]
 
 makeConsFolds :: Name -> [TyVarBndr] -> [NCon] -> DecsQ
 makeConsFolds nm ty cons = sequenceA [go, rest, appInst]
@@ -65,13 +66,25 @@ makeConsFolds nm ty cons = sequenceA [go, rest, appInst]
         rn <- newName "r"
         let r = PlainTV rn
         case cons of
-          [x] -> NewtypeD [] (foldGadtName nm) (ty ++ [r]) Nothing <$> (RecC (foldGadtName nm) <$> traverse (h (VarT rn)) [x]) <*> pure [ConT (mkName "Functor")]
-          _ -> DataD [] (foldGadtName nm) (ty ++ [r]) Nothing <$> (pure . RecC (foldGadtName nm) <$> traverse (h (VarT rn)) cons) <*> pure [ConT (mkName "Functor")]
+            [x]
+              | length (x ^. nconTypes) == 1 ->
+                  NewtypeD [] (foldGadtName nm) (ty ++ [r]) Nothing <$>
+                  (RecC (foldGadtName nm) <$> traverse (h (VarT rn)) [x]) <*>
+                  pure [ConT (mkName "Functor")]
+            _ ->
+                DataD [] (foldGadtName nm) (ty ++ [r]) Nothing <$>
+                (pure . RecC (foldGadtName nm) <$> traverse (h (VarT rn)) cons) <*>
+                pure [ConT (mkName "Functor")]
     h r ncon =
         return
             ( foldConsName (ncon ^. nconName)
             , Bang NoSourceUnpackedness NoSourceStrictness
-            , funcType (ncon ^. nconTypes) r)
+            , let fnt = funcType (ncon ^. nconTypes) r
+              in maybe
+                     fnt
+                     (\c ->
+                           ForallT (_nconForall ncon) c fnt)
+                     (ncon ^. nconCxt))
     funcType ts r =
         foldr
             (\x xs ->

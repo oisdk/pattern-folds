@@ -6,6 +6,7 @@
 {-# LANGUAGE TypeOperators         #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE DeriveFunctor         #-}
+{-# LANGUAGE RankNTypes     #-}
 
 module RecordCase
   (makeHandler
@@ -14,6 +15,7 @@ module RecordCase
   ,EitherAlg(..)
   ,ListAlg(..)
   ,FoldAlg(..)
+  ,BoolAlg(..)
   ,($|))
   where
 
@@ -34,6 +36,7 @@ infixr 0 $|
 
 makeHandler ''Maybe
 makeHandler ''Either
+makeHandler ''Bool
 
 data ListAlg a b = ListAlg
     { nil :: b
