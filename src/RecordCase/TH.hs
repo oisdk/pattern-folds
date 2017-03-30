@@ -7,6 +7,7 @@ import Control.Lens.Internal.TH
 import Data.Monoid
 import Data.Char
 import Prelude
+import Control.Monad (replicateM)
 
 data NCon = NCon
   { _nconName :: Name
@@ -27,8 +28,8 @@ nconCxt f x = fmap (\y -> x {_nconCxt = y}) (f (_nconCxt x))
 nconTypes :: Lens' NCon [Type]
 nconTypes f x = fmap (\y -> x {_nconTypes = y}) (f (_nconTypes x))
 
-makeRecordCase :: Name -> DecsQ
-makeRecordCase typeName = do
+makeHandler :: Name -> DecsQ
+makeHandler typeName = do
   info <- reify typeName
   case info of
     TyConI dec -> makeDecFolds dec
@@ -58,14 +59,14 @@ normalizeCon (RecGadtC conNames xs _) =
   [ NCon conName Nothing (map (view _3) xs) | conName <- conNames ]
 
 makeConsFolds :: Name -> [TyVarBndr] -> [NCon] -> DecsQ
-makeConsFolds nm ty cons = sequenceA [go, rest]
+makeConsFolds nm ty cons = sequenceA [go, rest, appInst]
   where
     go = do
         rn <- newName "r"
         let r = PlainTV rn
         DataD [] (foldGadtName nm) (ty ++ [r]) Nothing <$>
             (pure . RecC (foldGadtName nm) <$> traverse (h (VarT rn)) cons) <*>
-            pure []
+            pure [ConT (mkName "Functor")]
     h r ncon =
         return
             ( foldConsName (ncon ^. nconName)
@@ -78,20 +79,24 @@ makeConsFolds nm ty cons = sequenceA [go, rest]
             r
             ts
     origType = foldl AppT (ConT nm) (convertTVBs ty)
-    newTypeLifted = foldl AppT (ConT (foldGadtName nm)) (convertTVBs ty)
-    rest =
+    newTypeLifted xs = foldl AppT (ConT (foldGadtName nm)) (map VarT xs)
+    rest = do
+        innerVars <- traverse (const (newName "a")) ty
         InstanceD
             Nothing
-            []
+            (zipWith eq' ty innerVars)
             (foldl
                  AppT
-                 (ConT (mkName "AsRecordCase"))
-                 [origType, newTypeLifted]) <$>
-        sequence [FunD (mkName "matchRecord") . (: []) <$> instanceFunc]
+                 (ConT (mkName "Handles"))
+                 [newTypeLifted innerVars, origType]) <$>
+            sequence
+                [ FunD (mkName "recCase") . (: []) <$> instanceFunc
+                , pragInlD (mkName "recCase") Inline FunLike AllPhases]
+    eq' x y = AppT (AppT EqualityT (VarT (bndrName x))) (VarT y)
     instanceFunc = do
         expr <- newName "x"
         alg <- newName "handler"
-        Clause [VarP expr, VarP alg] <$>
+        Clause [VarP alg, VarP expr] <$>
             (NormalB <$> (CaseE (VarE expr) <$> traverse (run alg) cons)) <*>
             pure []
     run fnc cn = do
@@ -104,23 +109,83 @@ makeConsFolds nm ty cons = sequenceA [go, rest]
                           AppE
                           (VarE (foldConsName (cn ^. nconName)))
                           (map VarE (fnc : vars))))
-                []-- Match 
+                []
+    appInst = do
+        pnm <- newName "x"
+        lhs <- traverse (const (newName "fs")) cons
+        rhs <- traverse (const (newName "xs")) cons
+        InstanceD
+            Nothing
+            []
+            (AppT
+                 (ConT (mkName "Applicative"))
+                 (newTypeLifted (map bndrName ty))) <$>
+            sequence
+                [ pure $
+                  FunD
+                      (mkName "pure")
+                      [ Clause
+                            [VarP pnm]
+                            (NormalB
+                                 (foldl
+                                      AppE
+                                      (ConE (foldGadtName nm))
+                                      (map (rep' pnm) cons)))
+                            []]
+                , pragInlD (mkName "pure") Inline FunLike AllPhases
+                , FunD (mkName "<*>") <$>
+                  sequence
+                      [ Clause
+                            [ ConP (foldGadtName nm) (map VarP lhs)
+                            , ConP (foldGadtName nm) (map VarP rhs)] <$>
+                        (NormalB <$>
+                         (foldl AppE (ConE (foldGadtName nm)) <$>
+                          sequence (zipWith3 app' lhs rhs cons))) <*>
+                        pure []]
+                , pragInlD (mkName "<*>") Inline FunLike AllPhases
+                , pure $
+                  FunD
+                      (mkName "<*")
+                      [Clause [] (NormalB (VarE (mkName "const"))) []]
+                , pure $
+                  FunD
+                      (mkName "*>")
+                      [ Clause
+                            []
+                            (NormalB
+                                 (AppE
+                                      (VarE (mkName "const"))
+                                      (VarE (mkName "id"))))
+                            []]
+                , pragInlD (mkName "<*") Inline FunLike AllPhases
+                , pragInlD (mkName "*>") Inline FunLike AllPhases]
+    rep' pnm cns =
+        case length (cns ^. nconTypes) of
+            0 -> VarE pnm
+            n -> LamE (replicate n WildP) (VarE pnm)
+    app' f x c =
+        case length (c ^. nconTypes) of
+            0 -> pure (AppE (VarE f) (VarE x))
+            n -> do
+                vars <- replicateM n (newName "y")
+                pure $
+                    LamE
+                        (map VarP vars)
+                        (AppE
+                             (foldl AppE (VarE f) (map VarE vars))
+                             (foldl AppE (VarE x) (map VarE vars)))
 
 foldGadtName :: Name -> Name
 foldGadtName n = case nameBase n of
   [] -> error "foldGadtName: empty name base?"
   x:xs | isUpper x -> mkName (x : xs ++ "Alg")
-       | otherwise -> mkName (x : repC xs)
-       where
-         repC [] = "|"
-         repC ":" = "|"
-         repC (c:cs) = c : repC cs
+       | otherwise -> mkName (x : xs ++ "|")
 
 foldConsName :: Name -> Name
 foldConsName n = case nameBase n of
   [] -> error "foldGadtName: empty name base?"
   x:xs | isUpper x -> mkName (toLower x : xs)
-       | otherwise -> mkName (xs ++ ":")
+       | otherwise -> mkName xs
 
 convertTVBs :: [TyVarBndr] -> [Type]
 convertTVBs = map (VarT . bndrName)
