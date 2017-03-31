@@ -14,12 +14,9 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     PatternFolds
-                     , PatternFolds.TH
-                     , RecordCase
-                     , RecordCase.TH
+  exposed-modules:     Data.Functor.Rep.Handler
+                     , Data.Functor.Rep.Handler.TH
   build-depends:       base >= 4.7 && < 5
-                     , lens >= 4.15
                      , template-haskell >= 2.11
                      , adjunctions >= 4.3
                      , distributive >= 0.5
